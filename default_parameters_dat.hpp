@@ -23,7 +23,7 @@ public:
 	int nms_scale = 1;
 	double nms_overlap = 0.9;
 	double nms_score_factor = 0.5;
-	double nms_include_center_vote = true;
+	bool nms_include_center_vote = true;
 
 };
 

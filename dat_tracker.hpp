@@ -17,7 +17,8 @@ using namespace std;
 class DAT_TRACKER
 {
 public:
-	DAT_TRACKER();
+	DAT_TRACKER(){ cfg = default_parameters_dat(cfg); };
+	~DAT_TRACKER(){}
 
 	void tracker_dat_initialize(cv::Mat I, cv::Rect region);
 	
