@@ -10,7 +10,7 @@ class dat_cfg {
 public:
 	bool show_figures = false;
 	int  img_scale_target_diagonal	= 75;
-	double search_win_padding = 2;
+	double search_win_padding = 2.;
 	double surr_win_factor = 1.9;
 	int color_space = 1; //1rgb 2lab 3hsv 4gray
 	int num_bins = 16;

@@ -39,7 +39,7 @@ protected:
 
 	cv::Mat getForegroundProb(cv::Mat frame, cv::Mat prob_lut, cv::Mat bin_mapping);
 
-	cv::Mat CalculateHann(cv::Size sz);
+	cv::Mat calculateHann(cv::Size sz);
 
 	double intersectionOverUnion(cv::Rect target_rect, cv::Rect candidates);
 
