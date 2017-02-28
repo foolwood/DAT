@@ -1,18 +1,38 @@
 #ifndef DAT_TRACKER_HPP_
 #define DAT_TRACKER_HPP_
-#include <opencv2/opencv.hpp>
-#include <opencv2/core/core.hpp>
-#include <opencv2/imgproc/imgproc.hpp>
+#include <iostream>
 #include <vector>
 #include <string>
 #include <cmath>
-#include "default_parameters_dat.hpp"
-#include <iostream>
 
-using namespace cv;
-using namespace std;
+#include <opencv2/opencv.hpp>
+#include <opencv2/core/core.hpp>
+#include <opencv2/highgui/highgui.hpp>
+#include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/features2d/features2d.hpp>
 
-#define PI 3.141592653589793
+#define _PI 3.141592653589793
+#define _2PI 6.283185307179586
+
+
+struct dat_cfg {
+	bool show_figures = false;
+	int  img_scale_target_diagonal = 75;
+	double search_win_padding = 2;
+	double surr_win_factor = 1.9;
+	int color_space = 1; //1rgb 2lab 3hsv 4gray
+	int num_bins = 16;
+	cv::Mat bin_mapping; //getBinMapping(cfg.num_bins);
+	double prob_lut_update_rate = 0.05;
+	bool distractor_aware = true;
+	std::vector<double> adapt_thresh_prob_bins; // 0:0.05 : 1;
+	int motion_estimation_history_size = 5;
+
+	int nms_scale = 1;
+	double nms_overlap = 0.9;
+	double nms_score_factor = 0.5;
+	bool nms_include_center_vote = true;
+};
 
 class DAT_TRACKER
 {
@@ -39,7 +59,7 @@ protected:
 
 	cv::Mat getForegroundProb(cv::Mat frame, cv::Mat prob_lut, cv::Mat bin_mapping);
 
-	cv::Mat calculateHann(cv::Size sz);
+	cv::Mat CalculateHann(cv::Size sz);
 
 	double intersectionOverUnion(cv::Rect target_rect, cv::Rect candidates);
 
@@ -52,8 +72,6 @@ protected:
 	cv::Rect pos2rect(cv::Point obj_center, cv::Size obj_size);
 
 	cv::Mat getSubwindow(const cv::Mat &frame, cv::Point centerCoor, cv::Size sz);
-
-	cv::Mat getBinMapping(int num_bins);
 
 	dat_cfg default_parameters_dat(dat_cfg cfg);
 

@@ -1,6 +1,6 @@
 #include "dat_tracker.hpp"
 
-void DAT_TRACKER::tracker_dat_initialize(cv::Mat I, cv::Rect region) {
+void DAT_TRACKER::tracker_dat_initialize(cv::Mat I, cv::Rect region){
 
 	double cx = region.x + double(region.width - 1) / 2.0;
 	double cy = region.y + double(region.height - 1) / 2.0;
@@ -10,7 +10,7 @@ void DAT_TRACKER::tracker_dat_initialize(cv::Mat I, cv::Rect region) {
 	cv::Point target_pos(round(cx),round(cy));
 	cv::Size target_sz(round(w),round(h));
 
-	scale_factor_ = min(1.0, round(10.0 * double(cfg.img_scale_target_diagonal) / sqrt(double(target_sz.area()))) / 10.0);
+	scale_factor_ = std::min(1.0, round(10.0 * double(cfg.img_scale_target_diagonal) / cv::norm(cv::Point(target_sz.width,target_sz.height))) / 10.0);
 	target_pos.x = target_pos.x * scale_factor_; target_pos.y = target_pos.y * scale_factor_;
 	target_sz.width = target_sz.width * scale_factor_; target_sz.height = target_sz.height * scale_factor_;
   
@@ -50,7 +50,7 @@ void DAT_TRACKER::tracker_dat_initialize(cv::Mat I, cv::Rect region) {
 	target_sz_history_.push_back(cv::Size(target_sz.width / scale_factor_, target_sz.height / scale_factor_));
 }
 
-cv::Rect DAT_TRACKER::tracker_dat_update(cv::Mat I) {
+cv::Rect DAT_TRACKER::tracker_dat_update(cv::Mat I){
 
 	cv::Mat img_preprocessed;
 	cv::resize(I, img_preprocessed, cv::Size(), scale_factor_, scale_factor_);
@@ -77,12 +77,12 @@ cv::Rect DAT_TRACKER::tracker_dat_update(cv::Mat I) {
 	if (cfg.motion_estimation_history_size > 0)
 		prev_pos = prev_pos + getMotionPrediction(target_pos_history_, cfg.motion_estimation_history_size);
 
-	cv::Point target_pos(prev_pos.x*scale_factor_, prev_pos.y*scale_factor_);
+	cv::Point2f target_pos(prev_pos.x*scale_factor_, prev_pos.y*scale_factor_);
 	cv::Size target_sz(prev_sz.width*scale_factor_, prev_sz.height*scale_factor_);
 
 	cv::Size search_sz;
-	search_sz.width = floor(target_sz.width + cfg.search_win_padding*max(target_sz.width, target_sz.height));
-	search_sz.height = floor(target_sz.height + cfg.search_win_padding*max(target_sz.width, target_sz.height));
+	search_sz.width = floor(target_sz.width + cfg.search_win_padding*std::max(target_sz.width, target_sz.height));
+	search_sz.height = floor(target_sz.height + cfg.search_win_padding*std::max(target_sz.width, target_sz.height));
 	cv::Rect search_rect = pos2rect(target_pos, search_sz);
 	cv::Mat search_win, padded_search_win;
 	getSubwindowMasked(img, target_pos, search_sz, search_win, padded_search_win);
@@ -94,10 +94,10 @@ cv::Rect DAT_TRACKER::tracker_dat_update(cv::Mat I) {
 		pm_search_dist = getForegroundProb(search_win, prob_lut_distractor_, cfg.bin_mapping);
 		pm_search = (pm_search + pm_search_dist)/2.;
 	}
-	pm_search.setTo(0.0, padded_search_win);
+	pm_search.setTo(0, padded_search_win);
 
 	// Cosine / Hanning window
-	cv::Mat cos_win = calculateHann(search_sz);
+	cv::Mat cos_win = CalculateHann(search_sz);
 
 	std::vector<cv::Rect> hypotheses;
 	std::vector<double> vote_scores;
@@ -106,11 +106,11 @@ cv::Rect DAT_TRACKER::tracker_dat_update(cv::Mat I) {
 		cfg.nms_score_factor, cos_win, cfg.nms_include_center_vote, 
 		hypotheses, vote_scores, dist_scores);
 
-	std::vector<cv::Point> candidate_centers;
+	std::vector<cv::Point2f> candidate_centers;
 	std::vector<double> candidate_scores;
-	for (size_t i = 0; i < hypotheses.size(); ++i) {
-		candidate_centers.push_back(cv::Point(hypotheses[i].x + hypotheses[i].width / 2,
-			hypotheses[i].y + hypotheses[i].height / 2));
+	for (int i = 0; i < hypotheses.size(); ++i) {
+		candidate_centers.push_back(cv::Point2f(float(hypotheses[i].x) + float(hypotheses[i].width) / 2.,
+			float(hypotheses[i].y) + float(hypotheses[i].height) / 2.));
 		candidate_scores.push_back(vote_scores[i] * dist_scores[i]);
 	}
 	int best_candidate = max_element(candidate_scores.begin(), candidate_scores.end()) - candidate_scores.begin();
@@ -126,7 +126,7 @@ cv::Rect DAT_TRACKER::tracker_dat_update(cv::Mat I) {
 		for (int i = 0; i < hypotheses.size(); ++i){
 			if (i != best_candidate) {
 				distractors.push_back(hypotheses[i]);
-				distractor_overlap.push_back(intersectionOverUnion(target_rect, hypotheses[i]));
+				distractor_overlap.push_back(intersectionOverUnion(target_rect, distractors.back()));
 			}
 		}
 	} else {
@@ -134,9 +134,21 @@ cv::Rect DAT_TRACKER::tracker_dat_update(cv::Mat I) {
 		distractor_overlap.clear();
 	}
 
+	// Localization visualization
+	if (cfg.show_figures) {
+		cv::Mat pm_search_color;
+		pm_search.convertTo(pm_search_color,CV_8UC1,255);
+		applyColorMap(pm_search_color, pm_search_color, cv::COLORMAP_JET);
+		for (size_t i = 0; i < hypotheses.size(); ++i){
+			cv::rectangle(pm_search_color, hypotheses[i], cv::Scalar(0, 255, 255 * (i != best_candidate)), 2);
+		}
+		cv::imshow("Search Window", pm_search_color);
+		cv::waitKey(1);
+	}
+
 	// Appearance update
 	// Get current target position within full(possibly downscaled) image coorinates
-	cv::Point target_pos_img;
+	cv::Point2f target_pos_img;
 	target_pos_img.x = target_pos.x + search_rect.x;
 	target_pos_img.y = target_pos.y + search_rect.y;
 	if (cfg.prob_lut_update_rate > 0) {
@@ -202,31 +214,31 @@ cv::Rect DAT_TRACKER::tracker_dat_update(cv::Mat I) {
 	cv::Rect location = pos2rect(target_pos_history_.back(), target_sz_history_.back(), I.size());
 
 	// Adapt image scale factor
-	scale_factor_ = min(1.0, round(10.0 * double(cfg.img_scale_target_diagonal) / sqrt(double(target_sz_original.area()))) / 10.0);
+	scale_factor_ = std::min(1.0, round(10.0 * double(cfg.img_scale_target_diagonal) / cv::norm(cv::Point(target_sz_original.width, target_sz_original.height))) / 10.0);
 	return location;
 }
 
 void DAT_TRACKER::getNMSRects(cv::Mat prob_map, cv::Size obj_sz, double scale,
 	double overlap, double score_frac, cv::Mat dist_map, bool include_inner,
-	std::vector<cv::Rect> &top_rects, std::vector<double> &top_vote_scores, std::vector<double> &top_dist_scores) {
+	std::vector<cv::Rect> &top_rects, std::vector<double> &top_vote_scores, std::vector<double> &top_dist_scores){
 	int height = prob_map.rows;
 	int width = prob_map.cols;
 	cv::Size rect_sz(floor(obj_sz.width * scale), floor(obj_sz.height * scale));
 	int o_x, o_y;
 	if (include_inner) {
-		o_x = round(max(1.0, rect_sz.width * 0.2));
-		o_y = round(max(1.0, rect_sz.height * 0.2));
+		o_x = round(std::max(1.0, rect_sz.width*0.2));
+		o_y = round(std::max(1.0, rect_sz.height*0.2));
 	}
 
-	int stepx = max(1, int(round(rect_sz.width * (1.0 - overlap))));
-	int stepy = max(1, int(round(rect_sz.height * (1.0 - overlap))));
+	int stepx = std::max(1, int(round(rect_sz.width * (1.0 - overlap))));
+	int stepy = std::max(1, int(round(rect_sz.height * (1.0 - overlap))));
 
 	std::vector<int> posx, posy;
-	for (int i = 0; i <= (width -1 - rect_sz.width); i = i + stepx)
+	for (int i = 0; i <= (width -1 - rect_sz.width); i += stepx)
 	{
 		posx.push_back(i);
 	}
-	for (int i = 0; i <= (height -1 - rect_sz.height); i = i + stepy)
+	for (int i = 0; i <= (height -1 - rect_sz.height); i += stepy)
 	{
 		posy.push_back(i);
 	}
@@ -240,22 +252,18 @@ void DAT_TRACKER::getNMSRects(cv::Mat prob_map, cv::Size obj_sz, double scale,
 	b.setTo(height-1, b > (height-1));
 
 	std::vector<cv::Rect> boxes;
-	for (int i = 0; i < x.rows; ++i) {
-		for (int j = 0; j < x.cols; ++j) {
-			boxes.push_back(cv::Rect(x.at<int>(i, j), y.at<int>(i, j),
-				r.at<int>(i, j) - x.at<int>(i, j),
-				b.at<int>(i, j) - y.at<int>(i, j)));
-		}
-	}
+	int n = x.rows*x.cols;
+	int *p_x = x.ptr<int>(0);
+	int *p_y = y.ptr<int>(0);
+	int *p_r = r.ptr<int>(0);
+	int *p_b = b.ptr<int>(0);
+	for (int i = 0; i < n; ++i)
+		boxes.push_back(cv::Rect(p_x[i], p_y[i], p_r[i] - p_x[i], p_b[i] - p_y[i]));
+
 	std::vector<cv::Rect> boxes_inner;
 	if (include_inner) {
-		for (int i = 0; i < x.rows; ++i) {
-			for (int j = 0; j < x.cols; ++j) {
-				boxes_inner.push_back(cv::Rect(x.at<int>(i, j) + o_x, y.at<int>(i, j) + o_y,
-				r.at<int>(i, j) - 2 * o_x - x.at<int>(i, j),
-				b.at<int>(i, j) - 2 * o_y - y.at<int>(i, j)));
-			}
-		}
+		for (int i = 0; i < n; ++i)
+			boxes_inner.push_back(cv::Rect(p_x[i] + o_x, p_y[i] + o_y, p_r[i] - p_x[i] - 2 * o_x, p_b[i] - p_y[i] - 2 * o_y));
 	}
 
 	// Linear indices
@@ -264,26 +272,26 @@ void DAT_TRACKER::getNMSRects(cv::Mat prob_map, cv::Size obj_sz, double scale,
 	int h = height + 1;
 	int w = width + 1;
 	std::vector<cv::Point>bl, br, tl, tr;
-	for (int i = 0; i < x.rows; ++i) {
-		for (int j = 0; j < x.cols; ++j) {
-			bl.push_back(cv::Point(l.at<int>(i, j), b.at<int>(i, j)));
-			br.push_back(cv::Point(r.at<int>(i, j), b.at<int>(i, j)));
-			tl.push_back(cv::Point(l.at<int>(i, j), t.at<int>(i, j)));
-			tr.push_back(cv::Point(r.at<int>(i, j), t.at<int>(i, j)));
-		}	
+
+	int *p_l = l.ptr<int>(0);
+	int *p_t = t.ptr<int>(0);
+	for (int i = 0; i < n; ++i){
+		bl.push_back(cv::Point(p_l[i], p_b[i]));
+		br.push_back(cv::Point(p_r[i], p_b[i]));
+		tl.push_back(cv::Point(p_l[i], p_t[i]));
+		tr.push_back(cv::Point(p_r[i], p_t[i]));
 	}
 	cv::Size rect_sz_inner;
 	std::vector<cv::Point>bl_inner, br_inner, tl_inner, tr_inner;
-	if (include_inner) {
+	if (include_inner){
 		rect_sz_inner.width = rect_sz.width - 2 * o_x;
-		rect_sz_inner.height = rect_sz.height - 2 *o_y; //[r - l - 2 * o_x, b - t - 2 * o_y];
-		for (int i = 0; i < x.rows; ++i) {
-			for (int j = 0; j < x.cols; ++j) {
-				bl_inner.push_back(cv::Point(l.at<int>(i, j) + o_x, b.at<int>(i, j) - o_y));
-				br_inner.push_back(cv::Point(r.at<int>(i, j) - o_x, b.at<int>(i, j) - o_y));
-				tl_inner.push_back(cv::Point(l.at<int>(i, j) + o_x, t.at<int>(i, j) + o_y));
-				tr_inner.push_back(cv::Point(r.at<int>(i, j) - o_x, t.at<int>(i, j) + o_y));
-			}
+		rect_sz_inner.height = rect_sz.height - 2 *o_y;
+
+		for (int i = 0; i < n; ++i){
+			bl_inner.push_back(cv::Point(p_l[i]+o_x, p_b[i]-o_y));
+			br_inner.push_back(cv::Point(p_r[i]-o_x, p_b[i]-o_y));
+			tl_inner.push_back(cv::Point(p_l[i]+o_x, p_t[i]+o_y));
+			tr_inner.push_back(cv::Point(p_r[i]-o_x, p_t[i]+o_y));
 		}
 	}
 
@@ -292,16 +300,16 @@ void DAT_TRACKER::getNMSRects(cv::Mat prob_map, cv::Size obj_sz, double scale,
 	cv::Mat intDistMap;
 	cv::integral(dist_map, intDistMap);
 
-	std::vector<float> v_scores;
-	std::vector<float> d_scores;
-	for (size_t i = 0; i < bl.size(); ++i) {
-		v_scores.push_back(intProbMap.at<double>(br[i]) - intProbMap.at<double>(bl[i]) - intProbMap.at<double>(tr[i]) + intProbMap.at<double>(tl[i]));
-		d_scores.push_back(intDistMap.at<double>(br[i]) - intDistMap.at<double>(bl[i]) - intDistMap.at<double>(tr[i]) + intDistMap.at<double>(tl[i]));
+	std::vector<float> v_scores(n, 0);
+	std::vector<float> d_scores(n, 0);
+	for (int i = 0; i < bl.size(); ++i){
+		v_scores[i] = intProbMap.at<double>(br[i]) - intProbMap.at<double>(bl[i]) - intProbMap.at<double>(tr[i]) + intProbMap.at<double>(tl[i]);
+		d_scores[i] = intDistMap.at<double>(br[i]) - intDistMap.at<double>(bl[i]) - intDistMap.at<double>(tr[i]) + intDistMap.at<double>(tl[i]);
 	}
-	std::vector<float> scores_inner;
-	if (include_inner) {
-		for (size_t i = 0; i < bl.size(); ++i) {
-			scores_inner.push_back(intProbMap.at<double>(br_inner[i]) - intProbMap.at<double>(bl_inner[i]) - intProbMap.at<double>(tr_inner[i]) + intProbMap.at<double>(tl_inner[i]));
+	std::vector<float> scores_inner(n, 0);
+	if (include_inner){
+		for (int i = 0; i < bl.size(); ++i){
+			scores_inner[i] = intProbMap.at<double>(br_inner[i]) - intProbMap.at<double>(bl_inner[i]) - intProbMap.at<double>(tr_inner[i]) + intProbMap.at<double>(tl_inner[i]);
 			v_scores[i] = v_scores[i] / double(rect_sz.area()) + scores_inner[i] / double(rect_sz_inner.area());
 		}
 	}
@@ -327,7 +335,7 @@ void DAT_TRACKER::getNMSRects(cv::Mat prob_map, cv::Size obj_sz, double scale,
 		br.erase(br.begin() + midx);
 		tl.erase(tl.begin() + midx);
 		tr.erase(tr.begin() + midx);
-		if (include_inner) {
+		if (include_inner){
 			bl_inner.erase(bl_inner.begin() + midx);
 			br_inner.erase(br_inner.begin() + midx);
 			tl_inner.erase(tl_inner.begin() + midx);
@@ -337,15 +345,16 @@ void DAT_TRACKER::getNMSRects(cv::Mat prob_map, cv::Size obj_sz, double scale,
 		cv::integral(prob_map, intProbMap);
 		cv::integral(dist_map, intDistMap);
 
-		v_scores.clear(); d_scores.clear();
-		for (size_t i = 0; i < bl.size(); ++i) {
-			v_scores.push_back(intProbMap.at<double>(br[i]) - intProbMap.at<double>(bl[i]) - intProbMap.at<double>(tr[i]) + intProbMap.at<double>(tl[i]));
-			d_scores.push_back(intDistMap.at<double>(br[i]) - intDistMap.at<double>(bl[i]) - intDistMap.at<double>(tr[i]) + intDistMap.at<double>(tl[i]));
+		v_scores.resize(bl.size(), 0); 
+		d_scores.resize(bl.size(), 0);
+		for (int i = 0; i < bl.size(); ++i){
+			v_scores[i] = intProbMap.at<double>(br[i]) - intProbMap.at<double>(bl[i]) - intProbMap.at<double>(tr[i]) + intProbMap.at<double>(tl[i]);
+			d_scores[i] = intDistMap.at<double>(br[i]) - intDistMap.at<double>(bl[i]) - intDistMap.at<double>(tr[i]) + intDistMap.at<double>(tl[i]);
 		}
-		scores_inner.clear();
-		if (include_inner) {
-			for (size_t i = 0; i < bl.size(); ++i){
-				scores_inner.push_back(intProbMap.at<double>(br_inner[i]) - intProbMap.at<double>(bl_inner[i]) - intProbMap.at<double>(tr_inner[i]) + intProbMap.at<double>(tl_inner[i]));
+		scores_inner.resize(bl.size(), 0);
+		if (include_inner){
+			for (int i = 0; i < bl.size(); ++i){
+				scores_inner[i] = intProbMap.at<double>(br_inner[i]) - intProbMap.at<double>(bl_inner[i]) - intProbMap.at<double>(tr_inner[i]) + intProbMap.at<double>(tl_inner[i]);
 				v_scores[i] = v_scores[i] / (rect_sz.area()) + scores_inner[i] / (rect_sz_inner.area());
 			}
 		}
@@ -370,10 +379,10 @@ cv::Mat DAT_TRACKER::getForegroundDistractorProbs(cv::Mat frame, cv::Rect obj_re
 	
 	cv::Mat Md(frame.size(), CV_8UC1, cv::Scalar(0));
 	cv::Mat Mo(frame.size(), CV_8UC1, cv::Scalar(0));
-	for (size_t i = 0; i < distractors.size(); ++i) {
-		Mo(distractors[i]) = cv::Scalar(255);
+	for (int i = 0; i < distractors.size(); ++i) {
+		Mo(distractors[i]) = true;
 	}
-	Mo(obj_rect) = cv::Scalar(255);
+	Mo(obj_rect) = true;
 
 	cv::Mat obj_hist, distr_hist;
 	cv::calcHist(&frame, imgCount, channels, Md, distr_hist, dims, sizes, ranges);
@@ -382,31 +391,33 @@ cv::Mat DAT_TRACKER::getForegroundDistractorProbs(cv::Mat frame, cv::Rect obj_re
 	return prob_lut;
 }
 
-cv::Mat DAT_TRACKER::calculateHann(cv::Size sz) {
-	cv::Mat temp1(Size(sz.width, 1), CV_32FC1);
-	cv::Mat temp2(Size(sz.height, 1), CV_32FC1);
+cv::Mat DAT_TRACKER::CalculateHann(cv::Size sz) {
+	cv::Mat temp1(cv::Size(sz.width, 1), CV_32FC1);
+	cv::Mat temp2(cv::Size(sz.height, 1), CV_32FC1);
+	float *p1 = temp1.ptr<float>(0);
+	float *p2 = temp2.ptr<float>(0);
 	for (int i = 0; i < sz.width; ++i)
-		temp1.at<float>(0, i) = 0.5*(1 - cos(2 * PI * i / (sz.width - 1)));
+		p1[i] = 0.5*(1 - cos(_2PI*i / (sz.width - 1)));
 	for (int i = 0; i < sz.height; ++i)
-		temp2.at<float>(0, i) = 0.5*(1 - cos(2 * PI * i / (sz.height - 1)));
+		p2[i] = 0.5*(1 - cos(_2PI*i / (sz.height - 1)));
 	return temp2.t()*temp1;
 }
 
-cv::Mat DAT_TRACKER::getForegroundProb(cv::Mat frame, cv::Mat prob_lut, cv::Mat bin_mapping) {
+cv::Mat DAT_TRACKER::getForegroundProb(cv::Mat frame, cv::Mat prob_lut, cv::Mat bin_mapping){
 	cv::Mat frame_bin;
 	cv::Mat prob_map(frame.size(), CV_32FC1);
 	cv::LUT(frame, bin_mapping, frame_bin);
-	for (int i = 0; i < prob_map.rows; ++i) {
-		for (int j = 0; j < prob_map.cols; ++j){
-			prob_map.at<float>(i, j) = prob_lut.at<float>(frame_bin.at<cv::Vec3b>(i, j)[0],
-				frame_bin.at<cv::Vec3b>(i, j)[1],
-				frame_bin.at<cv::Vec3b>(i, j)[2]);
-		}
+	float *p_prob_map = prob_map.ptr<float>(0);
+	cv::MatIterator_<cv::Vec3b> it, end;
+	for (it = frame_bin.begin<cv::Vec3b>(), end = frame_bin.end<cv::Vec3b>(); it != end; ++it)
+	{
+		*p_prob_map++ = prob_lut.at<float>((*it)[0], (*it)[1], (*it)[2]);
 	}
 	return prob_map;
 }
 
-void DAT_TRACKER::getSubwindowMasked(cv::Mat im, cv::Point pos, cv::Size sz, cv::Mat &out, cv::Mat &mask) {
+void DAT_TRACKER::getSubwindowMasked(cv::Mat im, cv::Point pos, cv::Size sz, cv::Mat &out, cv::Mat &mask){
+
 	int xs_1 = floor(pos.x) + 1 - floor(double(sz.width) / 2.);
 	int xs_2 = floor(pos.x) + sz.width - floor(double(sz.width) / 2.);
 	int ys_1 = floor(pos.y) + 1 - floor(double(sz.height) / 2.);
@@ -415,14 +426,14 @@ void DAT_TRACKER::getSubwindowMasked(cv::Mat im, cv::Point pos, cv::Size sz, cv:
 	out = getSubwindow(im, pos, sz);
 
 	cv::Rect bbox(xs_1, ys_1, sz.width, sz.height);
-	bbox = bbox&cv::Rect(0, 0, im.cols, im.rows);
+	bbox = bbox&cv::Rect(0, 0, im.cols - 1, im.rows - 1);
 	bbox.x = bbox.x - xs_1;
 	bbox.y = bbox.y - ys_1;
-	mask = cv::Mat(sz, CV_8UC1, cv::Scalar(255));
-	mask(bbox) = cv::Scalar(0);
+	mask = cv::Mat(sz, CV_8UC1,cv::Scalar(1));
+	mask(bbox) = cv::Scalar(0.0);
 }
 
-cv::Point DAT_TRACKER::getMotionPrediction(std::vector<cv::Point>values, int maxNumFrames) {
+cv::Point DAT_TRACKER::getMotionPrediction(std::vector<cv::Point>values, int maxNumFrames){
 	cv::Point2f pred(0, 0);
 	if (values.size() < 3){
 		pred.x = 0; pred.y = 0;
@@ -433,7 +444,7 @@ cv::Point DAT_TRACKER::getMotionPrediction(std::vector<cv::Point>values, int max
 		double A2 = -1;
 		
 		std::vector<cv::Point> V;
-		for (int i = max(0, int(int(values.size()) - maxNumFrames)); i < values.size(); ++i)
+		for (int i = std::max(0, int(int(values.size()) - maxNumFrames)); i < values.size(); ++i)
 			V.push_back(values[i]);
 
 		std::vector<cv::Point2f> P;
@@ -441,7 +452,7 @@ cv::Point DAT_TRACKER::getMotionPrediction(std::vector<cv::Point>values, int max
 			P.push_back(cv::Point2f(A1*(V[i].x - V[i - 2].x) + A2*(V[i - 1].x - V[i - 2].x),
 				A1*(V[i].y - V[i - 2].y) + A2*(V[i - 1].y - V[i - 2].y)));
 		}
-		for (size_t i = 0; i < P.size(); ++i){
+		for (int i = 0; i < P.size(); ++i){
 			pred.x += P[i].x;
 			pred.y += P[i].y;
 		}
@@ -476,22 +487,24 @@ void DAT_TRACKER::getForegroundBackgroundProbs(cv::Mat frame, cv::Rect obj_rect,
 		obj_height = (frame.rows-1) - obj_row;
 	
 	cv::Mat obj_win;
-	frame(cv::Rect(max(0, obj_col), max(0, obj_row),
-		obj_col + obj_width + 1 - max(0, obj_col), obj_row + obj_height + 1 - max(0, obj_row))).copyTo(obj_win);
+	cv::Rect obj_region(std::max(0, obj_col), std::max(0, obj_row),
+		obj_col + obj_width + 1 - std::max(0, obj_col), obj_row + obj_height + 1 - std::max(0, obj_row));
+	obj_win = frame(obj_region);
 	cv::calcHist(&obj_win, imgCount, channels, mask, obj_hist, dims, sizes, ranges);
 	prob_lut = (obj_hist + 1.) / (surr_hist + 2.);
-	
+
 	prob_map = cv::Mat(frame.size(), CV_32FC1);
 	cv::Mat frame_bin;
 	cv::LUT(frame, bin_mapping, frame_bin);
-	for (int i = 0; i < prob_map.rows; ++i) {
-		for (int j = 0; j < prob_map.cols; ++j) {
-			prob_map.at<float>(i, j) = prob_lut.at<float>(frame_bin.at<cv::Vec3b>(i, j)[0],
-														  frame_bin.at<cv::Vec3b>(i, j)[1],
-														  frame_bin.at<cv::Vec3b>(i, j)[2]);
-		}
+
+	float *p_prob_map = prob_map.ptr<float>(0);
+	cv::MatIterator_<cv::Vec3b> it, end;
+	for (it = frame_bin.begin<cv::Vec3b>(), end = frame_bin.end<cv::Vec3b>(); it != end; ++it)
+	{
+		*p_prob_map++ = prob_lut.at<float>((*it)[0], (*it)[1], (*it)[2]);
 	}
 }
+
 
 void DAT_TRACKER::getForegroundBackgroundProbs(cv::Mat frame, cv::Rect obj_rect, int num_bins, cv::Mat &prob_lut) {
 	int imgCount = 1;
@@ -518,15 +531,16 @@ void DAT_TRACKER::getForegroundBackgroundProbs(cv::Mat frame, cv::Rect obj_rect,
 		obj_height = (frame.rows - 1) - obj_row;
 
 	cv::Mat obj_win;
-	frame(cv::Rect(max(0, obj_col), max(0, obj_row),
-		obj_col + obj_width + 1 - max(0, obj_col), obj_row + obj_height + 1 - max(0, obj_row))).copyTo(obj_win);
+	frame(cv::Rect(std::max(0, obj_col), std::max(0, obj_row), obj_width + 1, obj_height + 1)).copyTo(obj_win);
 	cv::calcHist(&obj_win, imgCount, channels, mask, obj_hist, dims, sizes, ranges);
-	prob_lut = (obj_hist + 1.) / (surr_hist + 2.);
+	prob_lut = (obj_hist + 1) / (surr_hist + 2);
 }
 
-double DAT_TRACKER::getAdaptiveThreshold(cv::Mat prob_map, cv::Rect obj_coords) {
-	cv::Mat obj_prob_map = prob_map(obj_coords).clone();
 
+double DAT_TRACKER::getAdaptiveThreshold(cv::Mat prob_map, cv::Rect obj_coords){
+	obj_coords.width++; obj_coords.width = std::min(prob_map.cols - obj_coords.x, obj_coords.width);
+	obj_coords.height++; obj_coords.height = std::min(prob_map.rows - obj_coords.y, obj_coords.height);
+	cv::Mat obj_prob_map = prob_map(obj_coords);
 	int bins = 21;
 	float range[] = { -0.025, 1.025 };
 	const float* histRange = { range };
@@ -534,14 +548,14 @@ double DAT_TRACKER::getAdaptiveThreshold(cv::Mat prob_map, cv::Rect obj_coords) 
 
 	cv::Mat H_obj, H_dist;
 	/// Compute the histograms:
-	cv::calcHist(&obj_prob_map, 1, 0, Mat(), H_obj, 1, &bins, &histRange, uniform, accumulate);
+	cv::calcHist(&obj_prob_map, 1, 0, cv::Mat(), H_obj, 1, &bins, &histRange, uniform, accumulate);
 
 	H_obj = H_obj / cv::sum(H_obj)[0];
 	cv::Mat cum_H_obj = H_obj.clone();
 	for (int i = 1; i < cum_H_obj.rows; ++i) 
 		cum_H_obj.at<float>(i, 0) += cum_H_obj.at<float>(i-1, 0);
 
-	cv::calcHist(&prob_map, 1, 0, Mat(), H_dist, 1, &bins, &histRange, uniform, accumulate);
+	cv::calcHist(&prob_map, 1, 0, cv::Mat(), H_dist, 1, &bins, &histRange, uniform, accumulate);
 	H_dist = H_dist - H_obj;
 	H_dist = H_dist / cv::sum(H_dist)[0];
 	cv::Mat cum_H_dist = H_dist.clone();
@@ -557,58 +571,50 @@ double DAT_TRACKER::getAdaptiveThreshold(cv::Mat prob_map, cv::Rect obj_coords) 
 	float xmin = 100;
 	int min_index = 0;
 	for (int i = 0; i < x.rows; ++i) {
-		if (xmin > x.at<float>(i, 0)) {
+		if (xmin > x.at<float>(i, 0))
+		{
 			xmin = x.at<float>(i, 0);
 			min_index = i;
 		}
 	}
 	//Final threshold result should lie between 0.4 and 0.7 to be not too restrictive
-	double threshold = max(.4, min(.7, cfg.adapt_thresh_prob_bins[min_index]));
+	double threshold = std::max(.4, std::min(.7, cfg.adapt_thresh_prob_bins[min_index]));
 	return threshold;
 }
 
-cv::Rect DAT_TRACKER::pos2rect(cv::Point obj_center, cv::Size obj_size, cv::Size win_size) {
+cv::Rect DAT_TRACKER::pos2rect(cv::Point obj_center, cv::Size obj_size, cv::Size win_size){
 	cv::Rect rect(round(obj_center.x - obj_size.width / 2), round(obj_center.y - obj_size.height / 2), obj_size.width, obj_size.height);
 	cv::Rect border(0, 0, win_size.width - 1, win_size.height - 1);
 	return rect&border;
 }
 
-cv::Rect DAT_TRACKER::pos2rect(cv::Point obj_center, cv::Size obj_size) {
+cv::Rect DAT_TRACKER::pos2rect(cv::Point obj_center, cv::Size obj_size){
 	cv::Rect rect(round(obj_center.x - obj_size.width / 2), round(obj_center.y - obj_size.height / 2), obj_size.width, obj_size.height);
 	return rect;
 }
 
-cv::Mat DAT_TRACKER::getBinMapping(int num_bins) {
-	cv::Mat lookUpTable(1, 256, CV_8U);
-	uchar* p = lookUpTable.data;
-	for (int i = 0; i < 256; ++i)
-		p[i] = i / (255 / num_bins);
-	return lookUpTable;
-}
-
-dat_cfg DAT_TRACKER::default_parameters_dat(dat_cfg cfg) {
-	cfg.bin_mapping = getBinMapping(cfg.num_bins);
+dat_cfg DAT_TRACKER::default_parameters_dat(dat_cfg cfg){
 	for (double i = 0; i <= 20; i++)
 		cfg.adapt_thresh_prob_bins.push_back(i*0.05);
 
 	cv::Mat lookUpTable(1, 256, CV_8U);
 	uchar* p = lookUpTable.data;
 	for (int i = 0; i < 256; ++i)
-		p[i] = i / (256 / cfg.num_bins);
+		p[i] = uchar(i / (256 / cfg.num_bins));
 	cfg.bin_mapping = lookUpTable;
 	return cfg;
 }
 
 cv::Mat DAT_TRACKER::getSubwindow(const cv::Mat &frame, cv::Point centerCoor, cv::Size sz) {
 	cv::Mat subWindow;
-	cv::Point lefttop(min(frame.cols - 1, max(-sz.width + 1, centerCoor.x - cvFloor(float(sz.width) / 2.0) + 1)),
-		min(frame.rows - 1, max(-sz.height + 1, centerCoor.y - cvFloor(float(sz.height) / 2.0) + 1)));
+	cv::Point lefttop(std::min(frame.cols - 1, std::max(-sz.width + 1, centerCoor.x - cvFloor(float(sz.width) / 2.0) + 1)),
+		std::min(frame.rows - 1, std::max(-sz.height + 1, centerCoor.y - cvFloor(float(sz.height) / 2.0) + 1)));
 	cv::Point rightbottom(lefttop.x + sz.width - 1, lefttop.y + sz.height - 1);
 
-	cv::Rect border(-min(lefttop.x, 0), -min(lefttop.y, 0),
-		max(rightbottom.x - frame.cols + 1, 0), max(rightbottom.y - frame.rows + 1, 0));
-	cv::Point lefttopLimit(max(lefttop.x, 0), max(lefttop.y, 0));
-	cv::Point rightbottomLimit(min(rightbottom.x, frame.cols - 1), min(rightbottom.y, frame.rows - 1));
+	cv::Rect border(-std::min(lefttop.x, 0), -std::min(lefttop.y, 0),
+		std::max(rightbottom.x - frame.cols + 1, 0), std::max(rightbottom.y - frame.rows + 1, 0));
+	cv::Point lefttopLimit(std::max(lefttop.x, 0), std::max(lefttop.y, 0));
+	cv::Point rightbottomLimit(std::min(rightbottom.x, frame.cols - 1), std::min(rightbottom.y, frame.rows - 1));
 
 	rightbottomLimit.x += 1;
 	rightbottomLimit.y += 1;
@@ -616,7 +622,7 @@ cv::Mat DAT_TRACKER::getSubwindow(const cv::Mat &frame, cv::Point centerCoor, cv
 
 	frame(roiRect).copyTo(subWindow);
 
-	if (border != Rect(0, 0, 0, 0))
+	if (border != cv::Rect(0, 0, 0, 0))
 		cv::copyMakeBorder(subWindow, subWindow, border.y, border.height, border.x, border.width, cv::BORDER_REPLICATE);
 	return subWindow;
 }
