@@ -5,7 +5,8 @@ For more info, visit the autor's [webpage](https://lrs.icg.tugraz.at/members/pos
 
 ![dat](dat.png)
 
-###Usage
+##Usage
+
 Simple test can be compiled like:
 ```
 cmake
@@ -19,7 +20,8 @@ make
 .\DAT vot2015
 ```
 
-###Speed
+##Speed
+
 Test in Windows with Intel i7-4790
 
 ![speed](speed.png)
@@ -28,7 +30,8 @@ Test in ubuntu 16.04 with Intel i7-6700
 
 ![speed](TEST_ON_UBUNTU1604.png)
 
-###Reference
+##Reference
+
 ```
 @INPROCEEDINGS{possegger15a,
   author = {Horst Possegger and Thomas Mauthner and Horst Bischof},
