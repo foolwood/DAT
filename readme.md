@@ -5,14 +5,16 @@ For more info, visit the autor's [webpage](https://lrs.icg.tugraz.at/members/pos
 
 ![dat](dat.png)
 
-##Usage
+## Usage
 
 Simple test can be compiled like:
 ```
 cmake
 make
-.\DAT test
+.\DAT
 ```
+![result](result.gif)
+
 For test the **[vot2015](http://votchallenge.net/vot2015/dataset.html)** challenge, please download the [dataset](http://box.vicos.si/vot/vot2015.zip) at first and then unzip to ${DAT}.
 ```
 cmake
@@ -20,7 +22,7 @@ make
 .\DAT vot2015
 ```
 
-##Speed
+## Speed
 
 Test in Windows with Intel i7-4790
 
@@ -30,7 +32,7 @@ Test in ubuntu 16.04 with Intel i7-6700
 
 ![speed](TEST_ON_UBUNTU1604.png)
 
-##Reference
+## Reference
 
 ```
 @INPROCEEDINGS{possegger15a,
